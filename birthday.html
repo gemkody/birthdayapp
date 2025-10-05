@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>🎂 Birthday Reminder</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font-family:system-ui,sans-serif;background:#fafafa;margin:0;padding:2rem;color:#222;overflow-x:hidden;}
+h1{text-align:center;color:#7b1fa2;}
+form{display:flex;flex-wrap:wrap;justify-content:center;gap:.5rem;margin-bottom:1rem;}
+input,select,button{padding:.6rem;border:1px solid #ccc;border-radius:.4rem;font-size:1rem;}
+button{background:#7b1fa2;color:white;cursor:pointer;}
+ul{list-style:none;padding:0;max-width:700px;margin:auto;}
+li{background:white;margin:.4rem 0;padding:.7rem;border-radius:.4rem;
+    box-shadow:0 1px 3px rgba(0,0,0,.1);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;}
+li.today{background:#ffe9f0;border-left:6px solid #ff4081;}
+a{text-decoration:none;color:#7b1fa2;margin-left:.3rem;}
+small{color:#555;}
+.editbox{display:none;margin-top:.4rem;}
+.editbox input,.editbox select{margin:.2rem;}
+canvas#confetti{position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:999;}
+</style>
+</head>
+
+<body>
+<canvas id="confetti"></canvas>
+<h1>🎂 Birthday Reminder</h1>
+<form id="addForm">
+  <input id="name" placeholder="Name">
+  <input id="phone" placeholder="Phone (e.g. 381601234567)">
+  <input id="date" type="date">
+  <select id="lang">
+    <option>English</option>
+    <option>German</option>
+    <option>Serbian</option>
+  </select>
+  <select id="tone">
+    <option>Informal</option>
+    <option>Formal</option>
+  </select>
+  <select id="app">
+    <option>WhatsApp</option>
+    <option>Viber</option>
+    <option>Facebook</option>
+  </select>
+  <button type="submit">Add</button>
+</form>
+<ul id="list"></ul>
+
+<script>
+// ---------- helpers ----------
+function ensurePermission(){ if(Notification.permission!=="granted") Notification.requestPermission(); }
+function normalizePhone(p){return p.replace(/\D/g,"");}
+function loadData(){return JSON.parse(localStorage.getItem("birthdays")||"[]");}
+function saveData(list){localStorage.setItem("birthdays",JSON.stringify(list));}
+
+// ---------- message text ----------
+function buildMsg(name,lang,tone){
+  lang=(lang||"English").toLowerCase();
+  tone=(tone||"Informal").toLowerCase();
+  if(lang==="german"){
+    return tone==="formal"
+      ? `🎉 Herzlichen Glückwunsch zum Geburtstag, ${name}! Ich wünsche Ihnen einen wunderbaren Tag und alles Gute fürs neue Lebensjahr. 🥳`
+      : `🎉 Alles Gute zum Geburtstag, ${name}! Ich wünsche dir viel Glück, Gesundheit und Freude. 🥳`;
+  }
+  if(lang==="serbian"){
+    return tone==="formal"
+      ? `🎉 Srećan rođendan, ${name}! Želim Vam puno zdravlja, sreće i uspeha u godinama koje dolaze. 🥳`
+      : `🎉 Srećan rođendan, ${name}! Želim ti puno osmeha, sreće i ljubavi danas i uvek! 🥳`;
+  }
+  return tone==="formal"
+    ? `🎉 Happy Birthday, ${name}! Wishing you a wonderful day and a successful year ahead. 🥳`
+    : `🎉 Happy Birthday, ${name}! Hope your day is full of fun, laughter, and cake! 🥳`;
+}
+
+// ---------- send actions ----------
+function openApp(b){
+  const msg = buildMsg(b.name,b.lang,b.tone);
+  const enc = encodeURIComponent(msg);
+  const phone = b.phone.startsWith("+") ? b.phone : "+"+b.phone;
+  if(b.app==="Viber"){
+    window.location.href = `viber://chat?number=${encodeURIComponent(phone)}&text=${enc}`;
+    setTimeout(()=>navigator.clipboard.writeText(msg)
+      .then(()=>alert("📋 Message copied! Open Viber and paste it there.")),1500);
+    return;
+  }
+  if(b.app==="Facebook"){
+    window.open(`https://www.facebook.com/sharer/sharer.php?quote=${enc}`,"_blank");
+    return;
+  }
+  window.open(`https://wa.me/${phone.replace("+","")}?text=${enc}`,"_blank");
+}
+
+// ---------- add / edit ----------
+function saveBirthday(e){
+  e.preventDefault();
+  const n=document.getElementById("name").value.trim();
+  let p=normalizePhone(document.getElementById("phone").value.trim());
+  const d=document.getElementById("date").value;
+  const l=document.getElementById("lang").value;
+  const t=document.getElementById("tone").value;
+  const a=document.getElementById("app").value;
+  if(!n||!p||!d){alert("Fill all fields!");return;}
+  if(p.startsWith("0")) p="381"+p.slice(1);
+  const arr=loadData(); arr.push({name:n,phone:p,date:d,lang:l,tone:t,app:a});
+  saveData(arr);
+  document.getElementById("addForm").reset();
+  listBirthdays();
+}
+function deleteBirthday(i){
+  if(!confirm("Delete this entry?")) return;
+  const d=loadData(); d.splice(i,1); saveData(d); listBirthdays();
+}
+function toggleEdit(i){
+  const box=document.getElementById("edit"+i);
+  box.style.display=(box.style.display==="block")?"none":"block";
+}
+function updateBirthday(i){
+  const d=loadData();
+  const n=document.getElementById("ename"+i).value.trim();
+  const p=normalizePhone(document.getElementById("ephone"+i).value.trim());
+  const date=document.getElementById("edate"+i).value;
+  const app=document.getElementById("eapp"+i).value;
+  const tone=document.getElementById("etone"+i).value;
+  if(!n||!p||!date){alert("Fill all fields!");return;}
+  d[i].name=n; d[i].phone=p; d[i].date=date; d[i].app=app; d[i].tone=tone;
+  saveData(d); listBirthdays();
+}
+
+// ---------- confetti ----------
+function startConfetti(){
+  const c=document.getElementById("confetti");
+  const ctx=c.getContext("2d");
+  c.width=window.innerWidth; c.height=window.innerHeight;
+  let parts=Array.from({length:120},()=>({
+    x:Math.random()*c.width,
+    y:Math.random()*-c.height,
+    r:Math.random()*6+3,
+    col:`hsl(${Math.random()*360},70%,60%)`,
+    spd:Math.random()*2+1
+  }));
+  function draw(){
+    ctx.clearRect(0,0,c.width,c.height);
+    parts.forEach(p=>{
+      ctx.beginPath(); ctx.fillStyle=p.col;
+      ctx.arc(p.x,p.y,p.r,0,2*Math.PI); ctx.fill();
+      p.y+=p.spd;
+      if(p.y>c.height){p.y=-10; p.x=Math.random()*c.width;}
+    });
+    requestAnimationFrame(draw);
+  }
+  draw();
+  setTimeout(()=>ctx.clearRect(0,0,c.width,c.height),7000);
+}
+
+// ---------- list & notify ----------
+function listBirthdays(){
+  const ul=document.getElementById("list"); ul.innerHTML="";
+  const today=(new Date()).toISOString().slice(5,10);
+  const todayFull=(new Date()).toISOString().slice(0,10);
+  const data=loadData();
+  let hasToday=false;
+
+  data.forEach((b,i)=>{
+    const msg=buildMsg(b.name,b.lang,b.tone);
+    const cal=`https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent("🎂 "+b.name+"'s Birthday")}&dates=${b.date.replace(/-/g,"")}T090000Z/${b.date.replace(/-/g,"")}T100000Z&details=${encodeURIComponent(msg)}`;
+    const isToday=b.date.slice(5,10)===today;
+    if(isToday) hasToday=true;
+
+    const li=document.createElement("li");
+    li.className=isToday?"today":"";
+    li.innerHTML=`<div><strong>${b.name}</strong> 🎂 ${b.date}<br>
+      <small>${b.lang} – ${b.tone}, via ${b.app}</small></div>
+      <div>
+        <a href="#" onclick='openApp(${JSON.stringify(b).replace(/"/g,"&quot;")})'>Send</a> |
+        <a href="${cal}" target="_blank">Google</a> |
+        <a href="#" onclick="toggleEdit(${i})">Edit</a> |
+        <a href="#" onclick="deleteBirthday(${i})">❌</a>
+      </div>
+      <div class="editbox" id="edit${i}">
+        <input id="ename${i}" value="${b.name}">
+        <input id="ephone${i}" value="${b.phone}">
+        <input id="edate${i}" type="date" value="${b.date}">
+        <select id="eapp${i}">
+          <option ${b.app==="WhatsApp"?"selected":""}>WhatsApp</option>
+          <option ${b.app==="Viber"?"selected":""}>Viber</option>
+          <option ${b.app==="Facebook"?"selected":""}>Facebook</option>
+        </select>
+        <select id="etone${i}">
+          <option ${b.tone==="Informal"?"selected":""}>Informal</option>
+          <option ${b.tone==="Formal"?"selected":""}>Formal</option>
+        </select>
+        <button onclick="updateBirthday(${i})">Save</button>
+      </div>`;
+    ul.appendChild(li);
+
+    // notify only once per day
+    const last = localStorage.getItem("lastNotify_"+b.name)||"";
+    if(isToday && last!==todayFull){
+      localStorage.setItem("lastNotify_"+b.name,todayFull);
+      const n=new Notification("🎂 "+b.name+"'s birthday!",{body:msg,data:{url:cal}});
+      n.onclick=e=>window.open(e.target.data.url,"_blank");
+    }
+  });
+
+  if(hasToday) startConfetti();
+}
+
+function checkDaily(){ listBirthdays(); setTimeout(checkDaily,6*60*60*1000); }
+
+document.getElementById("addForm").addEventListener("submit",saveBirthday);
+window.onload=function(){ ensurePermission(); listBirthdays(); checkDaily(); };
+</script>
+</body>
+</html>
